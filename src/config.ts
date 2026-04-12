@@ -10,6 +10,9 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'WEB_PORT',
+  'WEB_TOKEN',
+  'WEB_MFA_SECRET',
 ]);
 
 export const ASSISTANT_NAME =
@@ -52,6 +55,15 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
+
+// Web frontend
+export const WEB_PORT = parseInt(
+  process.env.WEB_PORT || envConfig.WEB_PORT || '18789',
+  10,
+);
+export const WEB_TOKEN = process.env.WEB_TOKEN || envConfig.WEB_TOKEN || '';
+// TOTP secret (base32). When set, login requires token + 6-digit authenticator code.
+export const WEB_MFA_SECRET = process.env.WEB_MFA_SECRET || envConfig.WEB_MFA_SECRET || '';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
@@ -76,6 +88,16 @@ export const DEFAULT_TRIGGER = `@${ASSISTANT_NAME}`;
 export function getTriggerPattern(trigger?: string): RegExp {
   const normalizedTrigger = trigger?.trim();
   return buildTriggerPattern(normalizedTrigger || DEFAULT_TRIGGER);
+}
+
+/**
+ * Like getTriggerPattern but matches the trigger anywhere in the message,
+ * not just at the start. Used for group-level trigger checks so that
+ * mentioning the assistant's name mid-sentence also counts.
+ */
+export function getGroupTriggerPattern(trigger?: string): RegExp {
+  const t = (trigger?.trim() || DEFAULT_TRIGGER);
+  return new RegExp(escapeRegex(t) + '\\b', 'i');
 }
 
 export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
