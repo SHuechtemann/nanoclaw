@@ -2,7 +2,12 @@ import crypto from 'crypto';
 import { spawn } from 'child_process';
 import http from 'http';
 
-import { ASSISTANT_NAME, WEB_MFA_SECRET, WEB_PORT, WEB_TOKEN } from '../config.js';
+import {
+  ASSISTANT_NAME,
+  WEB_MFA_SECRET,
+  WEB_PORT,
+  WEB_TOKEN,
+} from '../config.js';
 import { logger } from '../logger.js';
 import { Channel, NewMessage } from '../types.js';
 import { ChannelOpts, registerChannel } from './registry.js';
@@ -12,14 +17,18 @@ import { ChannelOpts, registerChannel } from './registry.js';
 function base32Decode(s: string): Buffer {
   const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const input = s.toUpperCase().replace(/[^A-Z2-7]/g, '');
-  let bits = 0, value = 0;
+  let bits = 0,
+    value = 0;
   const out: number[] = [];
   for (const c of input) {
     const idx = alpha.indexOf(c);
     if (idx < 0) continue;
     value = (value << 5) | idx;
     bits += 5;
-    if (bits >= 8) { out.push((value >>> (bits - 8)) & 0xff); bits -= 8; }
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
   }
   return Buffer.from(out);
 }
@@ -96,7 +105,10 @@ class WebChannel implements Channel {
     if (WEB_MFA_SECRET) {
       // MFA mode: bearer must be a valid session UUID
       const expiry = this.sessions.get(bearer);
-      if (!expiry || Date.now() > expiry) { this.sessions.delete(bearer); return false; }
+      if (!expiry || Date.now() > expiry) {
+        this.sessions.delete(bearer);
+        return false;
+      }
       return true;
     }
     // Legacy token mode
@@ -106,16 +118,22 @@ class WebChannel implements Channel {
   private broadcast(data: object): void {
     const payload = `data: ${JSON.stringify(data)}\n\n`;
     for (const client of [...this.sseClients]) {
-      try { client.write(payload); }
-      catch { this.sseClients.delete(client); }
+      try {
+        client.write(payload);
+      } catch {
+        this.sseClients.delete(client);
+      }
     }
   }
 
   private broadcastCC(data: object): void {
     const payload = `data: ${JSON.stringify(data)}\n\n`;
     for (const client of [...this.ccSseClients]) {
-      try { client.write(payload); }
-      catch { this.ccSseClients.delete(client); }
+      try {
+        client.write(payload);
+      } catch {
+        this.ccSseClients.delete(client);
+      }
     }
   }
 
@@ -129,7 +147,6 @@ class WebChannel implements Channel {
         this.ccSessionId = sid;
         this.ccCurrentText = '';
         this.broadcastCC({ type: 'cc_session', sessionId: sid.slice(0, 8) });
-
       } else if (event.type === 'stream_event') {
         // Real-time streaming: extract text deltas from content_block_delta events
         const inner = event.event as Record<string, unknown>;
@@ -141,10 +158,14 @@ class WebChannel implements Channel {
             this.broadcastCC({ type: 'cc_text_delta', text });
           }
         }
-
       } else if (event.type === 'assistant') {
         // Fallback: complete message (catches tool_use blocks which don't stream)
-        type ContentBlock = { type: string; text?: string; name?: string; input?: unknown };
+        type ContentBlock = {
+          type: string;
+          text?: string;
+          name?: string;
+          input?: unknown;
+        };
         const msg = event.message as { content?: ContentBlock[] };
         for (const block of msg.content ?? []) {
           if (block.type === 'tool_use') {
@@ -153,10 +174,13 @@ class WebChannel implements Channel {
               block.name === 'Bash'
                 ? String(input.command ?? '').slice(0, 120)
                 : JSON.stringify(input).slice(0, 120);
-            this.broadcastCC({ type: 'cc_tool', tool: block.name as string, preview });
+            this.broadcastCC({
+              type: 'cc_tool',
+              tool: block.name as string,
+              preview,
+            });
           }
         }
-
       } else if (event.type === 'result') {
         this.broadcastCC({ type: 'cc_done', isError: event.is_error ?? false });
         this.ccBusy = false;
@@ -169,7 +193,10 @@ class WebChannel implements Channel {
 
   private runClaude(prompt: string): void {
     if (this.ccBusy) {
-      this.broadcastCC({ type: 'cc_error', message: 'Beschäftigt – bitte warten.' });
+      this.broadcastCC({
+        type: 'cc_error',
+        message: 'Beschäftigt – bitte warten.',
+      });
       return;
     }
     this.ccBusy = true;
@@ -179,14 +206,18 @@ class WebChannel implements Channel {
     const args = [
       '--print',
       '--verbose',
-      '--output-format', 'stream-json',
+      '--output-format',
+      'stream-json',
       '--include-partial-messages',
       '--dangerously-skip-permissions',
     ];
     if (this.ccSessionId) args.push('--resume', this.ccSessionId);
     args.push(prompt);
 
-    logger.info({ bin: CLAUDE_BIN, hasSession: !!this.ccSessionId }, 'Spawning Claude Code');
+    logger.info(
+      { bin: CLAUDE_BIN, hasSession: !!this.ccSessionId },
+      'Spawning Claude Code',
+    );
 
     const proc = spawn(CLAUDE_BIN, args, {
       cwd: process.cwd(),
@@ -201,7 +232,10 @@ class WebChannel implements Channel {
     });
 
     proc.stderr.on('data', (chunk: Buffer) => {
-      logger.debug({ stderr: chunk.toString().slice(0, 200) }, 'Claude Code stderr');
+      logger.debug(
+        { stderr: chunk.toString().slice(0, 200) },
+        'Claude Code stderr',
+      );
     });
 
     proc.on('close', (code) => {
@@ -225,7 +259,10 @@ class WebChannel implements Channel {
   private readBody(req: http.IncomingMessage): Promise<string> {
     return new Promise((resolve, reject) => {
       let body = '';
-      req.on('data', (chunk: Buffer) => { body += chunk; if (body.length > 65_536) reject(new Error('too large')); });
+      req.on('data', (chunk: Buffer) => {
+        body += chunk;
+        if (body.length > 65_536) reject(new Error('too large'));
+      });
       req.on('end', () => resolve(body));
       req.on('error', reject);
     });
@@ -238,9 +275,16 @@ class WebChannel implements Channel {
 
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization',
+      );
 
-      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
 
       // ── Public: app info (MFA flag) ──────────────────────────────
       if (pathname === '/api/info' && req.method === 'GET') {
@@ -251,10 +295,17 @@ class WebChannel implements Channel {
 
       // ── Public: MFA login (token + TOTP → session) ───────────────
       if (pathname === '/api/auth' && req.method === 'POST') {
-        if (!WEB_MFA_SECRET) { res.writeHead(404); res.end('Not found'); return; }
+        if (!WEB_MFA_SECRET) {
+          res.writeHead(404);
+          res.end('Not found');
+          return;
+        }
         try {
           const body = await this.readBody(req);
-          const { token: t, totp } = JSON.parse(body) as { token?: string; totp?: string };
+          const { token: t, totp } = JSON.parse(body) as {
+            token?: string;
+            totp?: string;
+          };
           if (t !== WEB_TOKEN) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Ungültiger Token.' }));
@@ -270,7 +321,8 @@ class WebChannel implements Channel {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, session }));
         } catch {
-          res.writeHead(400); res.end(JSON.stringify({ error: 'Ungültige Anfrage.' }));
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'Ungültige Anfrage.' }));
         }
         return;
       }
@@ -293,13 +345,15 @@ class WebChannel implements Channel {
       if (pathname === '/api/status' && req.method === 'GET') {
         const groups = this.opts.registeredGroups();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          ok: true,
-          uptime: Math.floor(process.uptime()),
-          assistantName: ASSISTANT_NAME,
-          registeredGroups: Object.keys(groups).length,
-          connected: this._connected,
-        }));
+        res.end(
+          JSON.stringify({
+            ok: true,
+            uptime: Math.floor(process.uptime()),
+            assistantName: ASSISTANT_NAME,
+            registeredGroups: Object.keys(groups).length,
+            connected: this._connected,
+          }),
+        );
         return;
       }
 
@@ -308,10 +362,12 @@ class WebChannel implements Channel {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-          'X-Accel-Buffering': 'no',   // disable nginx buffering
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no', // disable nginx buffering
         });
-        res.write(`data: ${JSON.stringify({ type: 'connected', assistantName: ASSISTANT_NAME })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({ type: 'connected', assistantName: ASSISTANT_NAME })}\n\n`,
+        );
         this.sseClients.add(res);
         req.on('close', () => this.sseClients.delete(res));
         return;
@@ -322,20 +378,35 @@ class WebChannel implements Channel {
         try {
           const body = await this.readBody(req);
           const { text } = JSON.parse(body) as { text?: string };
-          if (!text?.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'Missing text' })); return; }
+          if (!text?.trim()) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: 'Missing text' }));
+            return;
+          }
           const timestamp = new Date().toISOString();
           const msg: NewMessage = {
-            id: crypto.randomUUID(), chat_jid: WEB_JID,
-            sender: 'web-user', sender_name: 'You',
-            content: text.trim(), timestamp,
-            is_from_me: false, is_bot_message: false,
+            id: crypto.randomUUID(),
+            chat_jid: WEB_JID,
+            sender: 'web-user',
+            sender_name: 'You',
+            content: text.trim(),
+            timestamp,
+            is_from_me: false,
+            is_bot_message: false,
           };
-          this.opts.onChatMetadata(WEB_JID, timestamp, 'Web Chat', 'web', false);
+          this.opts.onChatMetadata(
+            WEB_JID,
+            timestamp,
+            'Web Chat',
+            'web',
+            false,
+          );
           this.opts.onMessage(WEB_JID, msg);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
         } catch {
-          res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' }));
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
         }
         return;
       }
@@ -345,10 +416,12 @@ class WebChannel implements Channel {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-          'X-Accel-Buffering': 'no',   // disable nginx buffering
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no', // disable nginx buffering
         });
-        res.write(`data: ${JSON.stringify({ type: 'cc_connected', sessionId: this.ccSessionId?.slice(0, 8) ?? null, busy: this.ccBusy })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({ type: 'cc_connected', sessionId: this.ccSessionId?.slice(0, 8) ?? null, busy: this.ccBusy })}\n\n`,
+        );
         this.ccSseClients.add(res);
         req.on('close', () => this.ccSseClients.delete(res));
         return;
@@ -359,13 +432,22 @@ class WebChannel implements Channel {
         try {
           const body = await this.readBody(req);
           const { text } = JSON.parse(body) as { text?: string };
-          if (!text?.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'Missing text' })); return; }
-          if (this.ccBusy) { res.writeHead(429); res.end(JSON.stringify({ error: 'Beschäftigt' })); return; }
+          if (!text?.trim()) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: 'Missing text' }));
+            return;
+          }
+          if (this.ccBusy) {
+            res.writeHead(429);
+            res.end(JSON.stringify({ error: 'Beschäftigt' }));
+            return;
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
           this.runClaude(text.trim());
         } catch {
-          res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid JSON' }));
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
         }
         return;
       }
@@ -380,29 +462,46 @@ class WebChannel implements Channel {
         return;
       }
 
-      res.writeHead(404); res.end('Not found');
+      res.writeHead(404);
+      res.end('Not found');
     });
   }
 
   async connect(): Promise<void> {
     if (!this.opts.registeredGroups()[WEB_JID] && this.opts.registerGroup) {
       this.opts.registerGroup(WEB_JID, {
-        name: 'Web Chat', folder: WEB_FOLDER,
-        trigger: `@${ASSISTANT_NAME}`, added_at: new Date().toISOString(),
-        isMain: false, requiresTrigger: false,
+        name: 'Web Chat',
+        folder: WEB_FOLDER,
+        trigger: `@${ASSISTANT_NAME}`,
+        added_at: new Date().toISOString(),
+        isMain: false,
+        requiresTrigger: false,
       });
     }
     await new Promise<void>((resolve, reject) => {
-      this.server.listen(WEB_PORT, () => { this._connected = true; logger.info({ port: WEB_PORT }, 'Web channel listening'); resolve(); });
+      this.server.listen(WEB_PORT, () => {
+        this._connected = true;
+        logger.info({ port: WEB_PORT }, 'Web channel listening');
+        resolve();
+      });
       this.server.on('error', reject);
     });
   }
 
-  isConnected(): boolean { return this._connected; }
-  ownsJid(jid: string): boolean { return jid === WEB_JID; }
+  isConnected(): boolean {
+    return this._connected;
+  }
+  ownsJid(jid: string): boolean {
+    return jid === WEB_JID;
+  }
 
   async sendMessage(_jid: string, text: string): Promise<void> {
-    this.broadcast({ type: 'message', sender: 'assistant', text, timestamp: new Date().toISOString() });
+    this.broadcast({
+      type: 'message',
+      sender: 'assistant',
+      text,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   async setTyping(_jid: string, isTyping: boolean): Promise<void> {

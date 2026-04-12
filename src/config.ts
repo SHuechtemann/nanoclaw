@@ -63,7 +63,8 @@ export const WEB_PORT = parseInt(
 );
 export const WEB_TOKEN = process.env.WEB_TOKEN || envConfig.WEB_TOKEN || '';
 // TOTP secret (base32). When set, login requires token + 6-digit authenticator code.
-export const WEB_MFA_SECRET = process.env.WEB_MFA_SECRET || envConfig.WEB_MFA_SECRET || '';
+export const WEB_MFA_SECRET =
+  process.env.WEB_MFA_SECRET || envConfig.WEB_MFA_SECRET || '';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
@@ -96,7 +97,7 @@ export function getTriggerPattern(trigger?: string): RegExp {
  * mentioning the assistant's name mid-sentence also counts.
  */
 export function getGroupTriggerPattern(trigger?: string): RegExp {
-  const t = (trigger?.trim() || DEFAULT_TRIGGER);
+  const t = trigger?.trim() || DEFAULT_TRIGGER;
   return new RegExp(escapeRegex(t) + '\\b', 'i');
 }
 
