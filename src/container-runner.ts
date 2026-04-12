@@ -26,6 +26,7 @@ import {
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
+import { readEnvFile } from './env.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
@@ -251,6 +252,29 @@ async function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  const envVars = readEnvFile([
+    'TRILIUM_URL',
+    'HOMEASSISTANT_URL',
+    'HOMEASSISTANT_TOKEN',
+  ]);
+
+  // Trilium Notes integration — token is injected by OneCLI gateway
+  const triliumUrl = process.env.TRILIUM_URL || envVars.TRILIUM_URL;
+  if (triliumUrl) {
+    args.push('-e', `TRILIUM_URL=${triliumUrl}`);
+  }
+
+  // Home Assistant integration — token is injected by OneCLI gateway
+  const haUrl = process.env.HOMEASSISTANT_URL || envVars.HOMEASSISTANT_URL;
+  const haToken =
+    process.env.HOMEASSISTANT_TOKEN || envVars.HOMEASSISTANT_TOKEN;
+  if (haUrl) {
+    args.push('-e', `HOMEASSISTANT_URL=${haUrl}`);
+  }
+  if (haToken) {
+    args.push('-e', `HOMEASSISTANT_TOKEN=${haToken}`);
+  }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
