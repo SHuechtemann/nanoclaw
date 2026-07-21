@@ -2,15 +2,12 @@ import crypto from 'crypto';
 import { spawn } from 'child_process';
 import http from 'http';
 
-import {
-  ASSISTANT_NAME,
-  WEB_MFA_SECRET,
-  WEB_PORT,
-  WEB_TOKEN,
-} from '../config.js';
-import { logger } from '../logger.js';
-import { Channel, NewMessage } from '../types.js';
-import { ChannelOpts, registerChannel } from './registry.js';
+import { ASSISTANT_NAME, WEB_MFA_SECRET, WEB_PORT, WEB_TOKEN } from '../config.js';
+import { log } from '../log.js';
+import type { ChannelAdapter, ChannelDefaults, ChannelSetup, OutboundMessage } from './adapter.js';
+import { registerChannelAdapter } from './channel-registry.js';
+
+const logger = log;
 
 // ── TOTP helpers (RFC 6238, no external deps) ─────────────────────────────────
 
@@ -39,11 +36,7 @@ function hotp(key: Buffer, counter: number): string {
   buf.writeUInt32BE(counter >>> 0, 4);
   const hmac = crypto.createHmac('sha1', key).update(buf).digest();
   const offset = hmac[hmac.length - 1] & 0x0f;
-  const code =
-    ((hmac[offset] & 0x7f) << 24) |
-    (hmac[offset + 1] << 16) |
-    (hmac[offset + 2] << 8) |
-    hmac[offset + 3];
+  const code = ((hmac[offset] & 0x7f) << 24) | (hmac[offset + 1] << 16) | (hmac[offset + 2] << 8) | hmac[offset + 3];
   return String(code % 1_000_000).padStart(6, '0');
 }
 
@@ -63,14 +56,17 @@ const WEB_JID = 'web@nanoclaw';
 const WEB_FOLDER = 'web';
 
 // Resolve the claude CLI binary: prefer ~/.local/bin/claude, fall back to PATH
-const CLAUDE_BIN = process.env.HOME
-  ? `${process.env.HOME}/.local/bin/claude`
-  : 'claude';
+const CLAUDE_BIN = process.env.HOME ? `${process.env.HOME}/.local/bin/claude` : 'claude';
 
-class WebChannel implements Channel {
-  name = 'web';
+const WEB_DEFAULTS: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'public' },
+  group: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'public' },
+  mentions: 'never',
+};
+
+class WebChannel {
   private server: http.Server;
-  private opts: ChannelOpts;
+  private setup_config: ChannelSetup | null = null;
   private _connected = false;
 
   // MFA sessions: sessionId → expiry timestamp (ms)
@@ -87,8 +83,7 @@ class WebChannel implements Channel {
   private ccLineBuffer = '';
   private ccCurrentText = '';
 
-  constructor(opts: ChannelOpts) {
-    this.opts = opts;
+  constructor() {
     this.server = this.createServer();
   }
 
@@ -171,9 +166,7 @@ class WebChannel implements Channel {
           if (block.type === 'tool_use') {
             const input = (block.input ?? {}) as Record<string, unknown>;
             const preview =
-              block.name === 'Bash'
-                ? String(input.command ?? '').slice(0, 120)
-                : JSON.stringify(input).slice(0, 120);
+              block.name === 'Bash' ? String(input.command ?? '').slice(0, 120) : JSON.stringify(input).slice(0, 120);
             this.broadcastCC({
               type: 'cc_tool',
               tool: block.name as string,
@@ -214,10 +207,7 @@ class WebChannel implements Channel {
     if (this.ccSessionId) args.push('--resume', this.ccSessionId);
     args.push(prompt);
 
-    logger.info(
-      { bin: CLAUDE_BIN, hasSession: !!this.ccSessionId },
-      'Spawning Claude Code',
-    );
+    logger.info('Spawning Claude Code', { bin: CLAUDE_BIN, hasSession: !!this.ccSessionId });
 
     const proc = spawn(CLAUDE_BIN, args, {
       cwd: process.cwd(),
@@ -232,10 +222,7 @@ class WebChannel implements Channel {
     });
 
     proc.stderr.on('data', (chunk: Buffer) => {
-      logger.debug(
-        { stderr: chunk.toString().slice(0, 200) },
-        'Claude Code stderr',
-      );
+      logger.debug('Claude Code stderr', { stderr: chunk.toString().slice(0, 200) });
     });
 
     proc.on('close', (code) => {
@@ -250,7 +237,7 @@ class WebChannel implements Channel {
     });
 
     proc.on('error', (err) => {
-      logger.error({ err }, 'Failed to spawn Claude Code');
+      logger.error('Failed to spawn Claude Code', { err });
       this.ccBusy = false;
       this.broadcastCC({ type: 'cc_done', isError: true });
     });
@@ -275,10 +262,7 @@ class WebChannel implements Channel {
 
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader(
-        'Access-Control-Allow-Headers',
-        'Content-Type, Authorization',
-      );
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
       if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -343,14 +327,12 @@ class WebChannel implements Channel {
 
       // ── Status ───────────────────────────────────────────────────
       if (pathname === '/api/status' && req.method === 'GET') {
-        const groups = this.opts.registeredGroups();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({
             ok: true,
             uptime: Math.floor(process.uptime()),
             assistantName: ASSISTANT_NAME,
-            registeredGroups: Object.keys(groups).length,
             connected: this._connected,
           }),
         );
@@ -365,9 +347,7 @@ class WebChannel implements Channel {
           Connection: 'keep-alive',
           'X-Accel-Buffering': 'no', // disable nginx buffering
         });
-        res.write(
-          `data: ${JSON.stringify({ type: 'connected', assistantName: ASSISTANT_NAME })}\n\n`,
-        );
+        res.write(`data: ${JSON.stringify({ type: 'connected', assistantName: ASSISTANT_NAME })}\n\n`);
         this.sseClients.add(res);
         req.on('close', () => this.sseClients.delete(res));
         return;
@@ -384,24 +364,17 @@ class WebChannel implements Channel {
             return;
           }
           const timestamp = new Date().toISOString();
-          const msg: NewMessage = {
-            id: crypto.randomUUID(),
-            chat_jid: WEB_JID,
-            sender: 'web-user',
-            sender_name: 'You',
-            content: text.trim(),
-            timestamp,
-            is_from_me: false,
-            is_bot_message: false,
-          };
-          this.opts.onChatMetadata(
-            WEB_JID,
-            timestamp,
-            'Web Chat',
-            'web',
-            false,
-          );
-          this.opts.onMessage(WEB_JID, msg);
+          if (this.setup_config) {
+            this.setup_config.onMetadata(WEB_JID, 'Web Chat', false);
+            this.setup_config.onInbound(WEB_JID, null, {
+              id: crypto.randomUUID(),
+              kind: 'chat',
+              content: { text: text.trim(), sender: 'You', senderId: 'web:user' },
+              timestamp,
+              isMention: false,
+              isGroup: false,
+            });
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
         } catch {
@@ -467,21 +440,12 @@ class WebChannel implements Channel {
     });
   }
 
-  async connect(): Promise<void> {
-    if (!this.opts.registeredGroups()[WEB_JID] && this.opts.registerGroup) {
-      this.opts.registerGroup(WEB_JID, {
-        name: 'Web Chat',
-        folder: WEB_FOLDER,
-        trigger: `@${ASSISTANT_NAME}`,
-        added_at: new Date().toISOString(),
-        isMain: false,
-        requiresTrigger: false,
-      });
-    }
+  async setup(config: ChannelSetup): Promise<void> {
+    this.setup_config = config;
     await new Promise<void>((resolve, reject) => {
       this.server.listen(WEB_PORT, () => {
         this._connected = true;
-        logger.info({ port: WEB_PORT }, 'Web channel listening');
+        logger.info('Web channel listening', { port: WEB_PORT });
         resolve();
       });
       this.server.on('error', reject);
@@ -491,24 +455,21 @@ class WebChannel implements Channel {
   isConnected(): boolean {
     return this._connected;
   }
-  ownsJid(jid: string): boolean {
-    return jid === WEB_JID;
+
+  async deliver(_platformId: string, _threadId: string | null, message: OutboundMessage): Promise<string | undefined> {
+    const content = message.content as Record<string, unknown> | string | undefined;
+    const text = typeof content === 'string' ? content : typeof content?.text === 'string' ? content.text : '';
+    if (text) {
+      this.broadcast({ type: 'message', sender: 'assistant', text, timestamp: new Date().toISOString() });
+    }
+    return undefined;
   }
 
-  async sendMessage(_jid: string, text: string): Promise<void> {
-    this.broadcast({
-      type: 'message',
-      sender: 'assistant',
-      text,
-      timestamp: new Date().toISOString(),
-    });
+  async setTyping(_platformId: string, _threadId: string | null): Promise<void> {
+    this.broadcast({ type: 'typing', isTyping: true });
   }
 
-  async setTyping(_jid: string, isTyping: boolean): Promise<void> {
-    this.broadcast({ type: 'typing', isTyping });
-  }
-
-  async disconnect(): Promise<void> {
+  async teardown(): Promise<void> {
     this._connected = false;
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
   }
@@ -1041,7 +1002,20 @@ function getHtml(): string {
 </html>`;
 }
 
-registerChannel('web', (opts) => {
+function createWebAdapter(): ChannelAdapter | null {
   if (!WEB_TOKEN) return null;
-  return new WebChannel(opts);
-});
+  const channel = new WebChannel();
+  return {
+    name: 'web',
+    channelType: 'web',
+    supportsThreads: false,
+    defaults: WEB_DEFAULTS,
+    setup: (config) => channel.setup(config),
+    teardown: () => channel.teardown(),
+    isConnected: () => channel.isConnected(),
+    deliver: (platformId, threadId, message) => channel.deliver(platformId, threadId, message),
+    setTyping: (platformId, threadId) => channel.setTyping(platformId, threadId),
+  };
+}
+
+registerChannelAdapter('web', { factory: createWebAdapter, defaults: WEB_DEFAULTS });

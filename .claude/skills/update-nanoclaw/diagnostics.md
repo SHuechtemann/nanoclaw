@@ -19,7 +19,7 @@ Write `/tmp/nanoclaw-diagnostics.json`. No paths, usernames, hostnames, or IP ad
   "distinct_id": "<uuid>",
   "properties": {
     "success": true,
-    "nanoclaw_version": "1.2.21",
+    "nanoclaw_version": "2.0.76",
     "os_platform": "darwin",
     "arch": "arm64",
     "node_major_version": 22,
@@ -43,7 +43,6 @@ rm /tmp/nanoclaw-diagnostics.json
 **No**: `rm /tmp/nanoclaw-diagnostics.json`
 
 **Never ask again**:
-1. Replace contents of `.claude/skills/setup/diagnostics.md` with `# Diagnostics — opted out`
-2. Replace contents of `.claude/skills/update-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
-3. Remove the `## 9. Diagnostics` section from `.claude/skills/setup/SKILL.md` and the `## Diagnostics` section from `.claude/skills/update-nanoclaw/SKILL.md`
-4. `rm /tmp/nanoclaw-diagnostics.json`
+1. Replace contents of `.claude/skills/update-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
+2. Remove the `## Diagnostics` section from `.claude/skills/update-nanoclaw/SKILL.md`
+3. `rm /tmp/nanoclaw-diagnostics.json`
