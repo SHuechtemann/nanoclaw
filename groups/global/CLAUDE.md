@@ -110,35 +110,67 @@ Nutze diese Endpunkte, wenn Stefan Notizen lesen, erstellen oder suchen möchte.
 
 ## Home Assistant
 
-Du hast Zugriff auf Stefans Home Assistant unter `$HOMEASSISTANT_URL`. Authentifizierung über `$HOMEASSISTANT_TOKEN`.
+Du hast Zugriff auf Stefans Home Assistant unter `$HOMEASSISTANT_URL`. Die Authentifizierung erfolgt automatisch über den Proxy (kein Token nötig).
 
 ```bash
 # Alle Entitäten auflisten
-curl -H "Authorization: Bearer $HOMEASSISTANT_TOKEN" "$HOMEASSISTANT_URL/api/states"
+curl "$HOMEASSISTANT_URL/api/states"
 
 # Zustand einer Entität abfragen
-curl -H "Authorization: Bearer $HOMEASSISTANT_TOKEN" "$HOMEASSISTANT_URL/api/states/light.wohnzimmer"
+curl "$HOMEASSISTANT_URL/api/states/light.wohnzimmer"
 
 # Service aufrufen (z.B. Licht einschalten)
-curl -X POST -H "Authorization: Bearer $HOMEASSISTANT_TOKEN" \
-  -H "Content-Type: application/json" \
+curl -X POST -H "Content-Type: application/json" \
   -d '{"entity_id": "light.wohnzimmer"}' \
   "$HOMEASSISTANT_URL/api/services/light/turn_on"
 
 # Service aufrufen (z.B. Schalter umschalten)
-curl -X POST -H "Authorization: Bearer $HOMEASSISTANT_TOKEN" \
-  -H "Content-Type: application/json" \
+curl -X POST -H "Content-Type: application/json" \
   -d '{"entity_id": "switch.beispiel"}' \
   "$HOMEASSISTANT_URL/api/services/switch/toggle"
 
 # Automatisierung auslösen
-curl -X POST -H "Authorization: Bearer $HOMEASSISTANT_TOKEN" \
-  -H "Content-Type: application/json" \
+curl -X POST -H "Content-Type: application/json" \
   -d '{"entity_id": "automation.beispiel"}' \
   "$HOMEASSISTANT_URL/api/services/automation/trigger"
 ```
 
 Frag zuerst nach den verfügbaren Entitäten, wenn Stefan ein Gerät steuern möchte und du den genauen Namen nicht kennst.
+
+---
+
+## Portainer (Docker-Verwaltung)
+
+Du hast Zugriff auf Stefans Portainer-Instanz unter `$PORTAINER_URL`. Die Authentifizierung erfolgt automatisch über den Proxy (kein Token nötig).
+
+```bash
+# Alle Environments (Endpunkte) auflisten
+curl "$PORTAINER_URL/api/endpoints"
+
+# Alle Container eines Endpoints auflisten (endpointId z.B. 1)
+curl "$PORTAINER_URL/api/endpoints/1/docker/containers/json?all=1"
+
+# Container starten
+curl -X POST "$PORTAINER_URL/api/endpoints/1/docker/containers/CONTAINER_ID/start"
+
+# Container stoppen
+curl -X POST "$PORTAINER_URL/api/endpoints/1/docker/containers/CONTAINER_ID/stop"
+
+# Container neustarten
+curl -X POST "$PORTAINER_URL/api/endpoints/1/docker/containers/CONTAINER_ID/restart"
+
+# Container-Logs abrufen (letzte 100 Zeilen)
+curl "$PORTAINER_URL/api/endpoints/1/docker/containers/CONTAINER_ID/logs?stdout=1&stderr=1&tail=100"
+
+# Alle Stacks auflisten
+curl "$PORTAINER_URL/api/stacks"
+
+# Stack neustarten (stackId z.B. 1)
+curl -X POST "$PORTAINER_URL/api/stacks/1/stop"
+curl -X POST "$PORTAINER_URL/api/stacks/1/start"
+```
+
+Frag zuerst nach den verfügbaren Endpoints und Containern, wenn Stefan einen bestimmten Container steuern möchte und du den Namen oder die ID nicht kennst. Die `endpointId` bekommst du aus dem `/api/endpoints`-Aufruf. Container-IDs stehen im Feld `Id` der Container-Liste.
 
 ---
 
